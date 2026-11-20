@@ -174,7 +174,7 @@ export default function ReviewPane({
                       </div>
                     )}
                     {(!item || CAN_ASSIGN.has(item.status)) && f.inChange && (
-                      <AssignButtons onAssign={(to) => assignFinding(f, to)} />
+                      <AssignButtons canFix={model?.engine === 'claude'} onAssign={(to) => assignFinding(f, to)} />
                     )}
                     {copied === `agent-${findingKey(f)}` && <div className="hint">已复制，贴给别的 AI 就行</div>}
                   </div>

@@ -304,17 +304,55 @@ async function askOpenAI(rules, user) {
   return askOpenAIJson(system, user);
 }
 
+// Streamed: Node's fetch gives up after five minutes without response headers or between body
+// chunks, and a thinking model can take longer than that before its answer starts.
 async function askOpenAIJson(system, user) {
-  const r = await fetch(`${MODEL_URL}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.2, stream: false }),
-    signal: AbortSignal.timeout(15 * 60 * 1000),
-  });
-  if (!r.ok) throw fail(502, `模型回了 HTTP ${r.status}：${(await r.text()).slice(0, 300)}`);
-  const j = await r.json();
-  const text = j.choices?.[0]?.message?.content ?? '';
-  return { parsed: extractJson(text), text, usage: j.usage || null };
+  let text = '';
+  let usage = null;
+  const take = (line) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let j;
+    try { j = JSON.parse(data); } catch { return; }
+    text += j.choices?.[0]?.delta?.content ?? '';
+    if (j.usage) usage = j.usage;
+  };
+  try {
+    const r = await fetch(`${MODEL_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        temperature: 0.2,
+        stream: true,
+        stream_options: { include_usage: true },
+      }),
+      signal: AbortSignal.timeout(15 * 60 * 1000),
+    });
+    if (!r.ok) throw fail(502, `模型回了 HTTP ${r.status}：${(await r.text()).slice(0, 300)}`);
+    if (!(r.headers.get('content-type') || '').includes('text/event-stream')) {
+      // A service that ignores "stream" answers with one JSON body.
+      const j = await r.json();
+      text = j.choices?.[0]?.message?.content ?? '';
+      usage = j.usage || null;
+    } else {
+      const decoder = new TextDecoder();
+      let buf = '';
+      for await (const chunk of r.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        lines.forEach(take);
+      }
+      take(buf + decoder.decode());
+    }
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw fail(502, e.name === 'TimeoutError' ? '模型 15 分钟还没答完，停了' : `没能从模型服务拿到回答（${e.cause?.code || e.message}）`);
+  }
+  return { parsed: extractJson(text), text, usage };
 }
 
 async function review(body) {
@@ -514,7 +552,7 @@ async function workAssign(id, body) {
   const root = await resolveRepo(body.path);
   const to = body.to;
   if (!ASSIGNEES[to]) throw fail(400, '分配给谁不对');
-  if (to === 'claude' && ENGINE !== 'claude') throw fail(400, '这台电脑上没有 Claude Code，没法交给它自动去改');
+  if (to === 'claude' && ENGINE !== 'claude') throw fail(400, '现在审查用的不是 Claude Code，没法交给它自动去改');
   const item = await withWork(root, (w) => {
     const it = findItem(w, id);
     if (BUSY.has(it.status)) throw fail(409, `${id} 正在${it.status}，等它完了再分配`);
@@ -615,7 +653,11 @@ async function runRecheck(root, id) {
   const f = item.finding;
   insideRepo(root, f.file);
   let content;
-  try { content = await readFile(path.join(root, f.file), 'utf8'); } catch { content = '（这个文件现在不存在了）'; }
+  try {
+    const text = await readFile(path.join(root, f.file), 'utf8');
+    // Numbered so the reviewer's reason cites the right lines.
+    content = text.replace(/\n$/, '').split('\n').map((l, i) => `${i + 1}\t${l}`).join('\n');
+  } catch { content = '（这个文件现在不存在了）'; }
   if (content.length > 150000) content = `${content.slice(0, 150000)}\n……（后面太长，截掉了）`;
   const input = [
     '之前审查发现的问题：',
@@ -623,7 +665,7 @@ async function runRecheck(root, id) {
     `问题：${f.title}`,
     f.detail ? `原因：${f.detail}` : '',
     '',
-    '这个文件现在的全部内容：',
+    '这个文件现在的全部内容（每行开头是行号）：',
     content,
   ].join('\n');
   const system = '你是严格的代码复查员。只根据给出的文件内容判断那个问题还在不在，看不到的不要猜。原因用中文写一两句话。';

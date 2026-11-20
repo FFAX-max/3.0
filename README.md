@@ -37,11 +37,11 @@ Every problem can be handed off, which records it as a work item (W1, W2, …):
 
 | Hand to | What happens |
 |---|---|
-| **Claude 去改** (Claude fixes it) | The program runs Claude Code in your repository to fix this one problem, then rechecks automatically |
+| **Claude 去改** (Claude fixes it) | The program runs Claude Code in your repository to fix this one problem, then rechecks automatically. Shown only when Claude Code is the review engine |
 | **复制给别的 AI** (Copy to another AI) | The problem is written up as a prompt and copied to the clipboard for you to paste into another AI. When it is fixed, click "改好了，去复查" (Fixed, recheck) |
 | **我自己改** (I'll fix it myself) | You make the fix. When it is done, click "改好了，去复查" (Fixed, recheck) |
 
-- **Recheck**: the original problem and the full current text of the file go to the reviewer with one question: is the problem still there? The verdict is "passed" or "failed", with the reason.
+- **Recheck**: the original problem and the full current text of the file, with line numbers, go to the reviewer with one question: is the problem still there? The verdict is "passed" or "failed", with the reason.
 - Every step is recorded with its time, who acted and what they did: problem found → assigned → fixed (or no change) → recheck passed / failed → closed.
 - States: unassigned, assigned, fixing, rechecking, resolved, recheck failed, no change, error, interrupted, closed. If the service stops in the middle of a step, that step is recorded as "interrupted".
 
@@ -87,7 +87,7 @@ The range is `left...right` when comparing two branches, and `HEAD` for uncommit
 1. **Choosing the files**: code files come first, then smaller changes. Binary files, dependency lock files and deleted files are skipped. One review sends at most 200,000 characters of changes (60,000 with a local model) and looks at no more than 400 files. A single file whose diff takes more than half of that budget is left for its own review.
 2. **Sending to the model**
    - **Claude Code**: `claude -p … --output-format json --json-schema <result format> --system-prompt <review rules> --tools "" --strict-mcp-config --setting-sources project --no-session-persistence --permission-prompts none`. The changes go in through standard input, and it runs in a temporary folder. All tools are off, no external services are connected and no session is kept, so it sees only the changes it was given. The result comes from the `structured_output` field, and `--json-schema` guarantees its shape.
-   - **OpenAI-compatible service**: calls `/v1/chat/completions`, asks for a single JSON object, and extracts it from the answer.
+   - **OpenAI-compatible service**: calls `/v1/chat/completions` with `stream: true`, asks for a single JSON object, and extracts it from the answer. The answer is streamed because Node's `fetch` gives up after five minutes without response headers or between body chunks (undici's `headersTimeout` and `bodyTimeout`), and a model that thinks before it answers can take longer than that. One request may take up to 15 minutes.
 3. **Cleaning up the result**: only high, medium and low count as severities (anything else is recorded as unmarked). Each finding's file is checked against the files in this review. The result is saved as `data/runs/<id>.json`.
 
 ### How the work chain is recorded
@@ -95,7 +95,7 @@ The range is `left...right` when comparing two branches, and `HEAD` for uncommit
 - One record per repository: `data/work/<fingerprint of the repository path>.json`. It holds the list of work items. Each item keeps the problem itself, the review it came from, its state, who it was assigned to, and a list of events (time, who, what, details).
 - Writes to one repository's record are serialized, so a background job and a page request never overwrite each other.
 - **Claude fixes it**: runs `claude -p <the problem and fix instructions> --tools Read,Edit,Glob,Grep --permission-mode acceptEdits --permission-prompts none --strict-mcp-config --setting-sources project` in the repository folder. It can only read and edit files: no shell commands, no commits. A fingerprint of the file is taken before and after, to tell whether it really changed anything. The session is kept and its ID is written into the chain, so it can be traced later.
-- **Recheck**: the original problem and the full current text of the file (up to 150,000 characters) go to the reviewer, which answers in the form `{ fixed: true/false, reason: "…" }`.
+- **Recheck**: the original problem and the full current text of the file, numbered line by line so the reason cites the right lines (up to 150,000 characters), go to the reviewer, which answers in the form `{ fixed: true/false, reason: "…" }`.
 - The page refreshes background jobs every 3 seconds. After a service restart, unfinished jobs are recorded as "interrupted".
 
 ### How the drag-and-drop layout works
@@ -170,17 +170,17 @@ Then open http://127.0.0.1:8795 in a browser, enter the full path of a repositor
 
 ---
 
-## 5. Development status (2026-11-19, first version)
+## 5. Development status (2026-11-20, first version)
 
 | Part | Status |
 |---|---|
 | Side-by-side changes (two branches, uncommitted) | Done; tested on a Mac (a 6,240-file comparison; 7 and 16 uncommitted files) |
-| Review with Claude Code | Done; tested: one file in about 3 seconds, 16 files in about 2 minutes |
+| Review with Claude Code | Done; tested: one file in 3 to 18 seconds, 16 files in about 2 minutes |
 | Findings on their lines, click to jump | Done; tested |
 | Work chain (assign, automatic fix, recheck, close) | Done; tested in a throwaway repository: "Claude fixes → recheck passed" and "reported fixed but not changed → recheck failed" |
 | Drag-and-drop panels, resizing, remembered layout | Done; tested with simulated mouse drags in a built-in browser; not yet tested by hand |
-| Review with a local model (OpenAI-compatible, e.g. Ollama) | Code written, not yet tested: no local model available yet |
-| Keeping "Claude fixes it" when reviews use a local model | Not done: review and automatic fixes currently share one switch |
+| Review with a local model (OpenAI-compatible, e.g. Ollama) | Done; tested on a Mac with Ollama and gemma4:12b: a one-file review in 14 seconds (it found 1 problem where Claude Code found 5 in the same change), and a recheck. Answers are streamed, so a model that thinks for more than five minutes still gets through (tested with a stand-in service that answered after 330 seconds) |
+| Keeping "Claude fixes it" when reviews use a local model | Not done: review and automatic fixes currently share one switch, so with a local model the button is hidden |
 | Running on Windows | Not tested |
 | VS Code extension; plugging into other platforms | Not done |
 | English user interface | Not done; the interface is in Chinese |

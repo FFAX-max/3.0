@@ -29,11 +29,14 @@ export const CAN_ASSIGN = new Set(['待分配', '复查没过', '没改动', '�
 const time = (iso: string) =>
   new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
-export function AssignButtons({ onAssign }: { onAssign: (to: Assignee) => void }) {
+// Automatic fixes need Claude Code as the engine; with another engine that button is left out.
+export function AssignButtons({ canFix, onAssign }: { canFix: boolean; onAssign: (to: Assignee) => void }) {
   return (
     <div className="assign">
       <span className="assign-label">交给：</span>
-      <button type="button" onClick={() => onAssign('claude')} title="Claude 直接改仓库里的这个文件，改完自动复查">Claude 去改</button>
+      {canFix && (
+        <button type="button" onClick={() => onAssign('claude')} title="Claude 直接改仓库里的这个文件，改完自动复查">Claude 去改</button>
+      )}
       <button type="button" onClick={() => onAssign('agent')} title="把这条问题复制到剪贴板，贴给别的 AI">复制给别的 AI</button>
       <button type="button" onClick={() => onAssign('self')} title="你自己改，改好了点“改好了，去复查”">我自己改</button>
     </div>
@@ -42,11 +45,13 @@ export function AssignButtons({ onAssign }: { onAssign: (to: Assignee) => void }
 
 export default function WorkPane({
   items,
+  canFix,
   onAssign,
   onAct,
   onJump,
 }: {
   items: WorkItem[];
+  canFix: boolean;
   onAssign: (item: WorkItem, to: Assignee) => void;
   onAct: (id: string, action: 'done' | 'recheck' | 'close') => void;
   onJump: (f: Finding) => void;
@@ -95,7 +100,7 @@ export default function WorkPane({
             </ol>
             {!busy && (
               <div className="wactions">
-                {CAN_ASSIGN.has(it.status) && <AssignButtons onAssign={(to) => onAssign(it, to)} />}
+                {CAN_ASSIGN.has(it.status) && <AssignButtons canFix={canFix} onAssign={(to) => onAssign(it, to)} />}
                 {it.status === '已分配' && (
                   <button type="button" className="primary" onClick={() => onAct(it.id, 'done')}>改好了，去复查</button>
                 )}

@@ -345,7 +345,7 @@ export default function App() {
                 onShowWork={() => reveal('work')}
               />
             ),
-            work: <WorkPane items={work} onAssign={assignItem} onAct={act} onJump={jump} />,
+            work: <WorkPane items={work} canFix={model?.engine === 'claude'} onAssign={assignItem} onAct={act} onJump={jump} />,
           }}
         />
       </main>
