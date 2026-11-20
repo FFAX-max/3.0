@@ -1,0 +1,30 @@
+{
+  "name": "code-review-mirror",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Side-by-side git diff review: a model reviews the changes, findings sit on their lines, and each one is tracked until fixed",
+  "author": "JINGLEIW=FFAX",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server.mjs",
+    "web": "vite"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@pierre/diffs": "^1.6.4",
+    "dockview-react": "^8.9.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
